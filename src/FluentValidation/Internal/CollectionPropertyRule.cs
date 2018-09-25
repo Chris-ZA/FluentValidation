@@ -1,4 +1,5 @@
 ﻿#region License
+
 // Copyright (c) Jeremy Skinner (http://www.jeremyskinner.co.uk)
 // 
 // Licensed under the Apache License, Version 2.0 (the "License"); 
@@ -14,7 +15,9 @@
 // limitations under the License.
 // 
 // The latest version of this file can be found at https://github.com/JeremySkinner/FluentValidation
+
 #endregion
+
 namespace FluentValidation.Internal {
 	using System;
 	using System.Collections.Generic;
@@ -44,6 +47,11 @@ namespace FluentValidation.Internal {
 		}
 
 		/// <summary>
+		/// Filter that should include/exclude items in the collection.
+		/// </summary>
+		public Func<TProperty, bool> Filter { get; set; }
+
+		/// <summary>
 		/// Creates a new property rule from a lambda expression.
 		/// </summary>
 		public static CollectionPropertyRule<TProperty> Create<T>(Expression<Func<T, IEnumerable<TProperty>>> expression, Func<CascadeMode> cascadeModeThunk) {
@@ -61,40 +69,59 @@ namespace FluentValidation.Internal {
 		/// <param name="propertyName"></param>
 		/// <param name="cancellation"></param>
 		/// <returns></returns>
-		protected override Task<IEnumerable<ValidationFailure>> InvokePropertyValidatorAsync(ValidationContext context, IPropertyValidator validator, string propertyName, CancellationToken cancellation) {
+		protected override async Task<IEnumerable<ValidationFailure>> InvokePropertyValidatorAsync(ValidationContext context, IPropertyValidator validator, string propertyName, CancellationToken cancellation) {
+
+			if (string.IsNullOrEmpty(propertyName)) {
+				propertyName = InferPropertyName(Expression);
+			}
 
 			var propertyContext = new PropertyValidatorContext(context, this, propertyName);
-			var results = new List<ValidationFailure>();
 			var delegatingValidator = validator as IDelegatingValidator;
 
-			if (delegatingValidator == null || delegatingValidator.CheckCondition(propertyContext.Instance))
-			{
+			if (delegatingValidator == null || delegatingValidator.CheckCondition(propertyContext)) {
 				var collectionPropertyValue = propertyContext.PropertyValue as IEnumerable<TProperty>;
 
-				if (collectionPropertyValue != null)
-				{
+				if (collectionPropertyValue != null) {
+					if (string.IsNullOrEmpty(propertyName)) {
+						throw new InvalidOperationException("Could not automatically determine the property name ");
+					}
 
-					var validators = collectionPropertyValue.Select((v, count) => {
-						var newContext = context.CloneForChildValidator(context.InstanceToValidate);
+					var validatorTasks = collectionPropertyValue.Select(async (v, count) => {
+						if (Filter != null && !Filter(v)) {
+							return Enumerable.Empty<ValidationFailure>();
+						}
+
+						var newContext = context.CloneForChildCollectionValidator(context.InstanceToValidate, preserveParentContext: true);
 						newContext.PropertyChain.Add(propertyName);
 						newContext.PropertyChain.AddIndexer(count);
 
 						var newPropertyContext = new PropertyValidatorContext(newContext, this, newContext.PropertyChain.ToString(), v);
 
-						return validator.ValidateAsync(newPropertyContext, cancellation)
-							.Then(fs => results.AddRange(fs));
+						return await validator.ValidateAsync(newPropertyContext, cancellation);
 					});
+					
+					var results = new List<ValidationFailure>();
 
-
-					return
-					TaskHelpers.Iterate(
-						validators,
-						cancellationToken: cancellation
-					).Then(() => results.AsEnumerable(), runSynchronously: true);
+					foreach (var task in validatorTasks) {
+						var failures = await task;
+						results.AddRange(failures);
+					}
+					
+					return results;
 				}
 			}
 
-			return TaskHelpers.FromResult(Enumerable.Empty<ValidationFailure>());
+			return Enumerable.Empty<ValidationFailure>();
+		}
+
+		private string InferPropertyName(LambdaExpression expression) {
+			var paramExp = expression.Body as ParameterExpression;
+
+			if (paramExp == null) {
+				throw new InvalidOperationException("Could not infer property name for expression: " + expression + ". Please explicitly specify a property name by calling OverridePropertyName as part of the rule chain. Eg: RuleForEach(x => x).NotNull().OverridePropertyName(\"MyProperty\")");
+			}
+
+			return paramExp.Name;
 		}
 
 		/// <summary>
@@ -105,19 +132,33 @@ namespace FluentValidation.Internal {
 		/// <param name="propertyName"></param>
 		/// <returns></returns>
 		protected override IEnumerable<Results.ValidationFailure> InvokePropertyValidator(ValidationContext context, Validators.IPropertyValidator validator, string propertyName) {
+			if (string.IsNullOrEmpty(propertyName)) {
+				propertyName = InferPropertyName(Expression);
+			}
+
 			var propertyContext = new PropertyValidatorContext(context, this, propertyName);
 			var results = new List<ValidationFailure>();
 			var delegatingValidator = validator as IDelegatingValidator;
-			if (delegatingValidator == null || delegatingValidator.CheckCondition(propertyContext.Instance)) {
+			if (delegatingValidator == null || delegatingValidator.CheckCondition(propertyContext)) {
 				var collectionPropertyValue = propertyContext.PropertyValue as IEnumerable<TProperty>;
 
 				int count = 0;
 
 				if (collectionPropertyValue != null) {
+					if (string.IsNullOrEmpty(propertyName)) {
+						throw new InvalidOperationException("Could not automatically determine the property name ");
+					}
+
 					foreach (var element in collectionPropertyValue) {
-						var newContext = context.CloneForChildCollectionValidator(context.InstanceToValidate);
+						int index = count++;
+						
+						if (Filter != null && !Filter(element)) {
+							continue;
+						}
+						
+						var newContext = context.CloneForChildCollectionValidator(context.InstanceToValidate, preserveParentContext: true);
 						newContext.PropertyChain.Add(propertyName);
-						newContext.PropertyChain.AddIndexer(count++);
+						newContext.PropertyChain.AddIndexer(index);
 
 						var newPropertyContext = new PropertyValidatorContext(newContext, this, newContext.PropertyChain.ToString(), element);
 
@@ -125,6 +166,7 @@ namespace FluentValidation.Internal {
 					}
 				}
 			}
+
 			return results;
 		}
 	}

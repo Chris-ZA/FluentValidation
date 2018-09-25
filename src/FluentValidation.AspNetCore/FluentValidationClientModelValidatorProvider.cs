@@ -27,7 +27,12 @@ namespace FluentValidation.AspNetCore {
 
 	public delegate IClientModelValidator FluentValidationClientValidatorFactory(ClientValidatorProviderContext context, PropertyRule rule, IPropertyValidator validator);
 
+	/// <summary>
+	/// Used to generate clientside metadata from FluentValidation's rules.
+	/// </summary>
 	public class FluentValidationClientModelValidatorProvider : IClientModelValidatorProvider{
+		private readonly IHttpContextAccessor _httpContextAccessor;
+		private readonly ValidatorDescriptorCache _descriptorCache = new ValidatorDescriptorCache();
 
 		public Dictionary<Type, FluentValidationClientValidatorFactory> ClientValidatorFactories => _validatorFactories;
 
@@ -46,11 +51,7 @@ namespace FluentValidation.AspNetCore {
 			{ typeof(LessThanOrEqualValidator), (context, rule, validator) => new RangeMaxClientValidator(rule, validator) },
 			{ typeof(EqualValidator), (context, rule, validator) => new EqualToClientValidator(rule, validator) },
 			{ typeof(CreditCardValidator), (context, rule, validator) => new CreditCardClientValidator(rule, validator) },
-			
-
 		};
-
-		IHttpContextAccessor _httpContextAccessor;
 
 		public FluentValidationClientModelValidatorProvider(IHttpContextAccessor httpContextAccessor) {
 			_httpContextAccessor = httpContextAccessor;
@@ -64,47 +65,38 @@ namespace FluentValidation.AspNetCore {
 		}
 
 		public void CreateValidators(ClientValidatorProviderContext context) {
-			var modelType = context.ModelMetadata.ContainerType;
+			var descriptor = _descriptorCache.GetCachedDescriptor(context, _httpContextAccessor);
+			
+			if (descriptor != null) {
+				var propertyName = context.ModelMetadata.PropertyName;
 
-			var validatorFactory = (IValidatorFactory)_httpContextAccessor.HttpContext.RequestServices.GetService(typeof(IValidatorFactory));
+				var validatorsWithRules = from rule in descriptor.GetRulesForMember(propertyName)
+					let propertyRule = (PropertyRule) rule
+					let validators = rule.Validators
+					where validators.Any()
+					from propertyValidator in validators
+					let modelValidatorForProperty = GetModelValidator(context, propertyRule, propertyValidator)
+					where modelValidatorForProperty != null
+					select modelValidatorForProperty;
 
-			if (modelType != null ) {
-				var validator = validatorFactory.GetValidator(modelType);
+				var list = validatorsWithRules.ToList();
 
-				if (validator != null) {
-
-					var descriptor = validator.CreateDescriptor();
-					var propertyName = context.ModelMetadata.PropertyName;
-
-					var validatorsWithRules = from rule in descriptor.GetRulesForMember(propertyName)
-						let propertyRule = (PropertyRule) rule
-						let validators = rule.Validators
-						where validators.Any()
-						from propertyValidator in validators
-						let modelValidatorForProperty = GetModelValidator(context, propertyRule, propertyValidator)
-						where modelValidatorForProperty != null
-						select modelValidatorForProperty;
-
-					var list = validatorsWithRules.ToList();
-
-					foreach (var propVal in list) {
-						context.Results.Add(new ClientValidatorItem {
-							Validator = propVal,
-							IsReusable = false
-						});
-					}
-
-					// Must ensure there is at least 1 ClientValidatorItem, set to IsReusable = false
-					// otherwise MVC will cache the list of validators, assuming there will always be 0 validators for that property
-					// Which isn't true - we may be using the RulesetForClientsideMessages attribute (or some other mechanism) that can change the client validators that are available 
-					// depending on some context. 
-					if (list.Count == 0) {
-						context.Results.Add(new ClientValidatorItem { IsReusable = false });
-					}
-					
-					HandleNonNullableValueTypeRequiredRule(context);
-
+				foreach (var propVal in list) {
+					context.Results.Add(new ClientValidatorItem {
+						Validator = propVal,
+						IsReusable = false
+					});
 				}
+
+				// Must ensure there is at least 1 ClientValidatorItem, set to IsReusable = false
+				// otherwise MVC will cache the list of validators, assuming there will always be 0 validators for that property
+				// Which isn't true - we may be using the RulesetForClientsideMessages attribute (or some other mechanism) that can change the client validators that are available 
+				// depending on some context. 
+				if (list.Count == 0) {
+					context.Results.Add(new ClientValidatorItem {IsReusable = false});
+				}
+
+				HandleNonNullableValueTypeRequiredRule(context);
 			}
 		}
 
@@ -124,8 +116,7 @@ namespace FluentValidation.AspNetCore {
 			}
 		}
 
-		protected virtual IClientModelValidator GetModelValidator(ClientValidatorProviderContext context, PropertyRule rule, IPropertyValidator propertyValidator)
-		{
+		protected virtual IClientModelValidator GetModelValidator(ClientValidatorProviderContext context, PropertyRule rule, IPropertyValidator propertyValidator)	{
 			var type = propertyValidator.GetType();
 
 			var factory = _validatorFactories
@@ -135,8 +126,8 @@ namespace FluentValidation.AspNetCore {
 
 			if (factory != null) {
 				var ruleSetToGenerateClientSideRules = RuleSetForClientSideMessagesAttribute.GetRuleSetsForClientValidation(_httpContextAccessor?.HttpContext);
-				bool executeDefaultRule = (ruleSetToGenerateClientSideRules.Contains("default", StringComparer.OrdinalIgnoreCase) && string.IsNullOrEmpty(rule.RuleSet));
-				bool shouldExecute = ruleSetToGenerateClientSideRules.Contains(rule.RuleSet) || executeDefaultRule;
+				bool executeDefaultRule = (ruleSetToGenerateClientSideRules.Contains("default", StringComparer.OrdinalIgnoreCase) && (rule.RuleSets.Length == 0 || rule.RuleSets.Contains("default", StringComparer.OrdinalIgnoreCase)));
+				bool shouldExecute = ruleSetToGenerateClientSideRules.Intersect(rule.RuleSets, StringComparer.OrdinalIgnoreCase).Any() || executeDefaultRule;
 
 				if (shouldExecute) {
 					return factory.Invoke(context, rule, propertyValidator);

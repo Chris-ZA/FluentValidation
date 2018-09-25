@@ -22,6 +22,7 @@ namespace FluentValidation.TestHelper {
 	using System.Collections.Generic;
 	using System.Linq;
 	using System.Linq.Expressions;
+	using System.Reflection;
 	using Internal;
 	using Results;
 	using Validators;
@@ -37,7 +38,7 @@ namespace FluentValidation.TestHelper {
 		//This one
 		public static IEnumerable<ValidationFailure> ShouldHaveValidationErrorFor<T, TValue>(this IValidator<T> validator, Expression<Func<T, TValue>> expression, T objectToTest, string ruleSet = null) where T : class {
 			var value = expression.Compile()(objectToTest);
-			var testValidationResult = validator.TestValidate(expression, objectToTest, value, ruleSet);
+			var testValidationResult = validator.TestValidate(expression, objectToTest, value, ruleSet, setProperty:false);
 			return testValidationResult.ShouldHaveError();
 		}
 
@@ -48,29 +49,56 @@ namespace FluentValidation.TestHelper {
 			testValidationResult.ShouldNotHaveError();
 		}
 
-		//This one
 		public static void ShouldNotHaveValidationErrorFor<T, TValue>(this IValidator<T> validator, Expression<Func<T, TValue>> expression, T objectToTest, string ruleSet = null) where T : class {
 			var value = expression.Compile()(objectToTest);
-			var testValidationResult = validator.TestValidate(expression, objectToTest, value, ruleSet);
+			var testValidationResult = validator.TestValidate(expression, objectToTest, value, ruleSet, setProperty:false);
 			testValidationResult.ShouldNotHaveError();
 		}
 
 		public static void ShouldHaveChildValidator<T, TProperty>(this IValidator<T> validator, Expression<Func<T, TProperty>> expression, Type childValidatorType) {
 			var descriptor = validator.CreateDescriptor();
-			var expressionMemberName = expression.GetMember().Name;
-			var matchingValidators = descriptor.GetValidatorsForMember(expressionMemberName).ToArray();
-			var childValidatorTypes = matchingValidators.OfType<ChildValidatorAdaptor>().Select(x => x.ValidatorType);
-			childValidatorTypes = childValidatorTypes.Concat(matchingValidators.OfType<ChildCollectionValidatorAdaptor>().Select(x => x.ChildValidatorType));
+			var expressionMemberName = expression.GetMember()?.Name;
 
-			if (childValidatorTypes.All(x => x != childValidatorType)) {
+			if (expressionMemberName == null && !expression.IsParameterExpression()) {
+				throw new NotSupportedException("ShouldHaveChildValidator can only be used for simple property expressions. It cannot be used for model-level rules or rules that contain anything other than a property reference.");
+			}
+
+			var matchingValidators = 
+				expression.IsParameterExpression()	 ? GetModelLevelValidators(descriptor) :
+				descriptor.GetValidatorsForMember(expressionMemberName).ToArray();
+
+
+			matchingValidators = matchingValidators.Concat(GetDependentRules(expressionMemberName, expression, descriptor)).ToArray();
+			
+			var childValidatorTypes = matchingValidators.OfType<IChildValidatorAdaptor>().Select(x => x.ValidatorType);
+
+			if (childValidatorTypes.All(x => !childValidatorType.GetTypeInfo().IsAssignableFrom(x.GetTypeInfo()))) {
 				var childValidatorNames = childValidatorTypes.Any() ? string.Join(", ", childValidatorTypes.Select(x => x.Name)) : "none";
 				throw new ValidationTestException(string.Format("Expected property '{0}' to have a child validator of type '{1}.'. Instead found '{2}'", expressionMemberName, childValidatorType.Name, childValidatorNames));
 			}
 		}
 
-		private static TestValidationResult<T, TValue> TestValidate<T, TValue>(this IValidator<T> validator, Expression<Func<T, TValue>> expression, T instanceToValidate, TValue value, string ruleSet = null) where T : class {
-			var memberAccessor = ((MemberAccessor<T, TValue>) expression);
-			memberAccessor.Set(instanceToValidate, value);
+		private static IEnumerable<IPropertyValidator> GetDependentRules<T, TProperty>(string expressionMemberName, Expression<Func<T, TProperty>> expression, IValidatorDescriptor descriptor) {
+			var member = expression.IsParameterExpression() ? null : expressionMemberName;
+			var rules = descriptor.GetRulesForMember(member).OfType<PropertyRule>().SelectMany(x => x.DependentRules)
+				.SelectMany(x => x.Validators);
+
+			return rules;
+		}
+
+		private static IPropertyValidator[] GetModelLevelValidators(IValidatorDescriptor descriptor) {
+			var rules = descriptor.GetRulesForMember(null).OfType<PropertyRule>();
+			return rules.Where(x => x.Expression.IsParameterExpression()).SelectMany(x => x.Validators)
+				.ToArray();
+		}
+
+		private static TestValidationResult<T, TValue> TestValidate<T, TValue>(this IValidator<T> validator, Expression<Func<T, TValue>> expression, T instanceToValidate, TValue value, string ruleSet = null, bool setProperty=true) where T : class {
+			var memberAccessor = new MemberAccessor<T, TValue>(expression, setProperty);
+
+			if (setProperty) {
+				memberAccessor.Set(instanceToValidate, value);
+			}
+
 			var validationResult = validator.Validate(instanceToValidate, null, ruleSet: ruleSet);
 
 			return new TestValidationResult<T, TValue>(validationResult, memberAccessor);
@@ -91,22 +119,35 @@ namespace FluentValidation.TestHelper {
 		}
 
 		public static IEnumerable<ValidationFailure> When(this IEnumerable<ValidationFailure> failures, Func<ValidationFailure, bool> failurePredicate, string exceptionMessage = null) {
-			if (!failures.Any(failurePredicate))
-				throw new ValidationTestException(exceptionMessage ?? "Expected a validation error is not found");
+			bool anyMatched = failures.Any(failurePredicate);
 
+			if (!anyMatched) {
+				var failure = failures.First();
+				
+				string message = "Expected validation error was not found";
+
+				if (exceptionMessage != null) {
+					message = exceptionMessage.Replace("{Code}", failure.ErrorCode)
+						.Replace("{Message}", failure.ErrorMessage)
+						.Replace("{State}", failure.CustomState?.ToString() ?? "");
+				}
+
+				throw new ValidationTestException(message);
+			}
+			
 			return failures;
 		}
 
 		public static IEnumerable<ValidationFailure> WithCustomState(this IEnumerable<ValidationFailure> failures, object expectedCustomState) {
-			return failures.When(failure => failure.CustomState == expectedCustomState, string.Format("Expected custom state of '{0}'.", expectedCustomState));
+			return failures.When(failure => failure.CustomState == expectedCustomState, string.Format("Expected custom state of '{0}'. Actual state was '{{State}}'", expectedCustomState));
 		}
 
 		public static IEnumerable<ValidationFailure> WithErrorMessage(this IEnumerable<ValidationFailure> failures, string expectedErrorMessage) {
-			return failures.When(failure => failure.ErrorMessage == expectedErrorMessage, string.Format("Expected an error message of '{0}'.", expectedErrorMessage));
+			return failures.When(failure => failure.ErrorMessage == expectedErrorMessage, string.Format("Expected an error message of '{0}'. Actual message was '{{Message}}'", expectedErrorMessage));
 		}
 
 		public static IEnumerable<ValidationFailure> WithErrorCode(this IEnumerable<ValidationFailure> failures, string expectedErrorCode) {
-			return failures.When(failure => failure.ErrorCode == expectedErrorCode, string.Format("Expected an error code of '{0}'.", expectedErrorCode));
+			return failures.When(failure => failure.ErrorCode == expectedErrorCode, string.Format("Expected an error code of '{0}'. Actual error code was '{{Code}}'", expectedErrorCode));
 		}
 	}
 }

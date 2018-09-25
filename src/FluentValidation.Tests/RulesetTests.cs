@@ -143,6 +143,78 @@ namespace FluentValidation.Tests {
 			result.IsValid.ShouldBeFalse();
 		}
 
+		[Fact]
+		public void Ruleset_selection_should_cascade_downwards_with_when_setting_child_validator_using_include_statement_with_lambda() {
+			var validator = new InlineValidator<Person>();
+			validator.Include(x => new TestValidator2());
+			var result = validator.Validate(new Person(), ruleSet:"Names");
+			result.IsValid.ShouldBeFalse();
+		}
+
+		
+		[Fact]
+		public void Trims_spaces() {
+			var validator = new InlineValidator<Person>();
+			validator.RuleSet("First", () => {
+				validator.RuleFor(x => x.Forename).NotNull();
+			});
+			validator.RuleSet("Second", () => {
+				validator.RuleFor(x => x.Surname).NotNull();
+			});
+
+			var result = validator.Validate(new Person(), ruleSet: "First, Second");
+			result.Errors.Count.ShouldEqual(2);
+		}
+
+		[Fact]
+		public void Applies_multiple_rulesets_to_rule() {
+			var validator = new InlineValidator<Person>();
+			validator.RuleSet("First, Second", () => {
+				validator.RuleFor(x => x.Forename).NotNull();
+			});
+
+			var result = validator.Validate(new Person(), ruleSet: "First");
+			result.Errors.Count.ShouldEqual(1);
+
+			result = validator.Validate(new Person(), ruleSet: "Second");
+			result.Errors.Count.ShouldEqual(1);
+
+			result = validator.Validate(new Person(), ruleSet: "Third");
+			result.Errors.Count.ShouldEqual(0);
+
+			result = validator.Validate(new Person());
+			result.Errors.Count.ShouldEqual(0);
+		}
+
+		[Fact]
+		public void Executes_in_rule_in_ruleset_and_default() {
+			var validator = new InlineValidator<Person>();
+			validator.RuleSet("First, Default", () => {
+				validator.RuleFor(x => x.Forename).NotNull();
+			});
+
+			var result = validator.Validate(new Person(), ruleSet: "First");
+			result.Errors.Count.ShouldEqual(1);
+
+			result = validator.Validate(new Person(), ruleSet: "Second");
+			result.Errors.Count.ShouldEqual(0);
+
+			result = validator.Validate(new Person());
+			result.Errors.Count.ShouldEqual(1);
+		}
+
+		[Fact]
+		public void Executes_in_rule_in_default_and_none() {
+			var validator = new InlineValidator<Person>();
+			validator.RuleSet("First, Default", () => {
+				validator.RuleFor(x => x.Forename).NotNull();
+			});
+			validator.RuleFor(x => x.Forename).NotNull();
+
+			var result = validator.Validate(new Person(), ruleSet: "default");
+			result.Errors.Count.ShouldEqual(2);
+		}
+
 
 		private class TestValidator : AbstractValidator<Person> {
 			public TestValidator() {

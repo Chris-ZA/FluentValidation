@@ -1,12 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net452</TargetFramework>
     <AssemblyName>FluentValidation.Tests.Mvc5</AssemblyName>
     <RootNamespace>FluentValidation.Tests.Mvc5</RootNamespace>
-	  <IsPackable>false</IsPackable>
-	  <OutputType>Library</OutputType>
-	</PropertyGroup>
+	<IsPackable>false</IsPackable>
+	<OutputType>Library</OutputType>
+  </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="..\FluentValidation.Tests\TestExtensions.cs" Link="TestExtensions.cs" />
@@ -19,9 +18,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.0.0-preview-20170106-08" />
-    <PackageReference Include="Microsoft.TestPlatform.TestHost" Version="15.0.0" />
-    <PackageReference Include="System.ComponentModel.Annotations" Version="4.4.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.7.2" />
+    <PackageReference Include="Microsoft.TestPlatform.TestHost" Version="15.7.2" />
+    <PackageReference Include="System.ComponentModel.Annotations" Version="4.4.1" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.2.0" />
     <PackageReference Include="xunit" Version="2.2.0" />
 		<PackageReference Include="Moq" Version="4.7.99" />
@@ -60,6 +59,10 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <ItemGroup>
+    <Service Include="{82a7f48d-3b50-4b1e-b82e-3ada8210c358}" />
+  </ItemGroup>
+
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <OutputType>Library</OutputType>
   </PropertyGroup>
@@ -71,5 +74,10 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <NoWarn>1701;1702;1705;1998;0618</NoWarn>
   </PropertyGroup>
-
+  <Import Project="../netfx.props"/>
+  <ItemGroup Condition="'$(TargetFramework)'=='net452' AND '$(OS)'=='Unix'">
+    <!-- Workarounds for Mono -->
+    <Reference Include="System.Runtime"/>
+    <Reference Include="System.Threading.Tasks"/>
+  </ItemGroup>
 </Project>

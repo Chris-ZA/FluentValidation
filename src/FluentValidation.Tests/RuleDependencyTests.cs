@@ -19,6 +19,7 @@
 namespace FluentValidation.Tests {
 	using System.Linq;
 	using System.Threading.Tasks;
+	using Internal;
 	using Xunit;
 
 	public class RuleDependencyTests {
@@ -26,8 +27,8 @@ namespace FluentValidation.Tests {
 		public void Invokes_dependent_rule_if_parent_rule_passes() {
 			var validator = new TestValidator();
 			validator.RuleFor(x => x.Surname).NotNull()
-				.DependentRules(d => {
-					d.RuleFor(x => x.Forename).NotNull();
+				.DependentRules(() => {
+					validator.RuleFor(x => x.Forename).NotNull();
 				});
 
 			var results = validator.Validate(new Person {Surname = "foo"});
@@ -40,9 +41,9 @@ namespace FluentValidation.Tests {
 		{
 			var validator = new TestValidator();
 			validator.RuleFor(x => x.Surname).NotNull()
-				.DependentRules(d =>
+				.DependentRules(() =>
 				{
-					d.RuleFor(x => x.Forename).NotNull();
+					validator.RuleFor(x => x.Forename).NotNull();
 				});
 
 			var results = validator.Validate(new Person { Surname = null });
@@ -51,13 +52,31 @@ namespace FluentValidation.Tests {
 		}
 
 		[Fact]
+		public void Nested_dependent_rules() {
+			var validator = new TestValidator();
+			validator.RuleFor(x => x.Surname).NotNull()
+				.DependentRules(() => {
+					validator.RuleFor(x => x.Forename).NotNull().DependentRules(() => {
+						validator.RuleFor(x => x.Forename).NotEqual("foo");
+					});
+				});
+
+			var results = validator.Validate(new Person { Surname = "foo" });
+			results.Errors.Count.ShouldEqual(1);
+			results.Errors.Single().PropertyName.ShouldEqual("Forename");
+			var rule = (PropertyRule) validator.Single();
+			rule.DependentRules.Count.ShouldEqual(1);
+			((PropertyRule) rule.DependentRules[0]).DependentRules.Count.ShouldEqual(1);
+		}
+
+		[Fact]
 		public void Dependent_rules_inside_ruleset() {
 			var validator = new TestValidator();
 			validator.RuleSet("MyRuleSet", () => {
 
 				validator.RuleFor(x => x.Surname).NotNull()
-					.DependentRules(d => {
-						d.RuleFor(x => x.Forename).NotNull();
+					.DependentRules(() => {
+						validator.RuleFor(x => x.Forename).NotNull();
 					});
 			});
 
@@ -72,9 +91,9 @@ namespace FluentValidation.Tests {
 			validator.When(o => o.Forename != null, () =>
 			{
 				validator.RuleFor(o => o.Age).LessThan(1)
-				.DependentRules(d =>
+				.DependentRules(() =>
 				{
-					d.RuleFor(o => o.Forename).NotNull();
+					validator.RuleFor(o => o.Forename).NotNull();
 				});
 			}); ;
 
@@ -87,9 +106,9 @@ namespace FluentValidation.Tests {
 			var validator = new TestValidator();
 			validator.RuleFor(o => o.Forename)
 				.NotNull()
-				.DependentRules(d => {
-					d.RuleFor(o => o.Address).NotNull();
-					d.RuleFor(o => o.Age).MustAsync(async (p, token) => await Task.FromResult(p > 10));
+				.DependentRules(() => {
+					validator.RuleFor(o => o.Address).NotNull();
+					validator.RuleFor(o => o.Age).MustAsync(async (p, token) => await Task.FromResult(p > 10));
 				});
 
 			var result = await validator.ValidateAsync(new Person());
@@ -107,9 +126,9 @@ namespace FluentValidation.Tests {
 			var validator = new TestValidator();
 			validator.RuleFor(o => o)
 				.MustAsync(async (p, ct) => await Task.FromResult(p.Forename != null))
-				.DependentRules(d => {
-					d.RuleFor(o => o.Address).NotNull();
-					d.RuleFor(o => o.Age).MustAsync(async (p, token) => await Task.FromResult(p > 10));
+				.DependentRules(() => {
+					validator.RuleFor(o => o.Address).NotNull();
+					validator.RuleFor(o => o.Age).MustAsync(async (p, token) => await Task.FromResult(p > 10));
 				});
 
 			var result = await validator.ValidateAsync(new Person());
@@ -136,6 +155,123 @@ namespace FluentValidation.Tests {
 			result.IsValid.ShouldBeFalse();
 		}
 
+		[Fact]
+		public void Treats_root_level_RuleFor_call_as_dependent_rule_if_user_forgets_to_use_DependentRulesBuilder()
+		{
+			var validator = new TestValidator();
+			validator.RuleFor(x => x.Surname).NotNull()
+				.DependentRules(() => {
+					validator.RuleFor(x => x.Forename).NotNull();  // Shouldn't be invoked
+				});
+
+			var results = validator.Validate(new Person { Surname = null });
+			results.Errors.Count.ShouldEqual(1); //only the root NotNull should fire
+			results.Errors.Single().PropertyName.ShouldEqual("Surname");
+		}
+
+		[Fact]
+		public void Nested_dependent_rules_inside_ruleset()
+		{
+			var validator = new TestValidator();
+			validator.RuleSet("MyRuleSet", () =>
+			{
+
+				validator.RuleFor(x => x.Surname).NotNull()
+					.DependentRules(() =>
+					{
+
+
+						validator.RuleFor(x => x.Forename).NotNull()
+							.DependentRules(() =>
+							{
+								validator.RuleFor(x => x.Address).NotNull();
+							});
+					});
+			});
+
+			var results = validator.Validate(new Person { Surname = "foo", Forename = "foo" }, ruleSet: "MyRuleSet");
+			results.Errors.Count.ShouldEqual(1);
+			results.Errors.Single().PropertyName.ShouldEqual("Address");
+		}
+
+		[Fact]
+		public void Nested_dependent_rules_inside_ruleset_no_result_when_top_level_fails()
+		{
+			var validator = new TestValidator();
+			validator.RuleSet("MyRuleSet", () =>
+			{
+
+				validator.RuleFor(x => x.Surname).NotNull()
+					.DependentRules(() =>
+					{
+
+
+						validator.RuleFor(x => x.Forename).NotNull()
+							.DependentRules(() =>
+							{
+								validator.RuleFor(x => x.Address).NotNull();
+							});
+					});
+			});
+
+			var results = validator.Validate(new Person { Surname = null, Forename = "foo" }, ruleSet: "MyRuleSet");
+			results.Errors.Count.ShouldEqual(1);
+			results.Errors[0].PropertyName.ShouldEqual("Surname");
+		}
+
+		[Fact]
+		public void Nested_dependent_rules_inside_ruleset_no_result_when_second_level_fails()
+		{
+			var validator = new TestValidator();
+			validator.RuleSet("MyRuleSet", () =>
+			{
+
+				validator.RuleFor(x => x.Surname).NotNull()
+					.DependentRules(() =>
+					{
+
+
+						validator.RuleFor(x => x.Forename).NotNull()
+							.DependentRules(() =>
+							{
+								validator.RuleFor(x => x.Address).NotNull();
+							});
+					});
+			});
+
+			var results = validator.Validate(new Person { Surname = "bar", Forename = null }, ruleSet: "MyRuleSet");
+			results.Errors.Count.ShouldEqual(1);
+			results.Errors[0].PropertyName.ShouldEqual("Forename");
+		}
+
+
+		[Fact]
+		public void Nested_dependent_rules_inside_ruleset_inside_method()
+		{
+			var validator = new TestValidator();
+			validator.RuleSet("MyRuleSet", () =>
+			{
+
+				validator.RuleFor(x => x.Surname).NotNull()
+					.DependentRules(() =>
+					{
+						validator.RuleFor(x => x.Forename).NotNull()
+							.DependentRules(() =>
+							{
+								BaseValidation(validator);
+							});
+					});
+			});
+
+			var results = validator.Validate(new Person { Surname = "foo", Forename = "foo" }, ruleSet: "MyRuleSet");
+			results.Errors.Count.ShouldEqual(1);
+			results.Errors.Single().PropertyName.ShouldEqual("Address");
+		}
+
+		private void BaseValidation(InlineValidator<Person> validator)
+		{
+			validator.RuleFor(x => x.Address).NotNull();
+		}
 
 		class AsyncValidator : AbstractValidator<int> {
 			public AsyncValidator() {
@@ -144,8 +280,8 @@ namespace FluentValidation.Tests {
 						await Task.Delay(500);
 						return true;
 					})
-					.DependentRules(dependentRules => {
-						dependentRules.RuleFor(m => m)
+					.DependentRules(() => {
+						RuleFor(m => m)
 							.MustAsync(async (ie, ct) => {
 								await Task.Delay(1000);
 								return false;
@@ -158,8 +294,8 @@ namespace FluentValidation.Tests {
 			public AsyncValidator2() {
 				RuleFor(model => model)
 					.Must((ie) => true)
-					.DependentRules(dependentRules => {
-						dependentRules.RuleFor(m => m)
+					.DependentRules(() => {
+						RuleFor(m => m)
 							.MustAsync(async (ie, ct) => {
 								await Task.Delay(1000);
 								return false;

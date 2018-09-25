@@ -1,7 +1,9 @@
 ﻿namespace FluentValidation.Tests {
+	using System;
 	using System.Collections.Generic;
 	using System.Globalization;
 	using System.Linq;
+	using System.Linq.Expressions;
 	using Resources;
 	using Validators;
 	using Xunit;
@@ -25,7 +27,7 @@
 		public void Gets_translation_for_specific_culture() {
 			using (new CultureScope("zh-CN")) {
 				var msg = _languages.GetStringForValidator<NotNullValidator>();
-				msg.ShouldEqual("请填写 '{PropertyName}'。");
+				msg.ShouldEqual("'{PropertyName}' 不能为Null。");
 			}
 		}
 
@@ -57,10 +59,12 @@
 
 		[Fact]
 		public void Falls_back_to_english_when_translation_missing() {
-			// Chinese doesn't have enumvalidator translated
+			var l = new LanguageManager();
+			l.AddTranslation("en", "TestValidator", "foo");
+
 			using (new CultureScope("zh-CN")) {
-				var msg = _languages.GetStringForValidator<EnumValidator>();
-				msg.ShouldEqual("'{PropertyName}' has a range of values which does not include '{PropertyValue}'.");
+				var msg = l.GetStringForValidator<TestValidator>();
+				msg.ShouldEqual("foo");
 			}
 		}
 
@@ -102,7 +106,7 @@
 
 
 		[Fact]
-		public void All_localizatons_have_same_parameters_as_English() {
+		public void All_localizations_have_same_parameters_as_English() {
 
 			LanguageManager manager = (LanguageManager)_languages;
 			var languages = manager.GetSupportedLanguages();
@@ -111,6 +115,21 @@
 			Assert.All(languages, l => Assert.All(keys, k => CheckParametersMatch(l, k)));
 		}
 
+		[Fact]
+		public void All_languages_should_be_loaded() {
+			var languages = typeof(LanguageManager).Assembly.GetTypes()
+				.Where(t => typeof(Language).IsAssignableFrom(t) && !t.IsAbstract && t.Name != "GenericLanguage")
+				.Select(t => (Language) Activator.CreateInstance(t));
+			
+			var l = (LanguageManager) _languages;
+			var languageCodes = l.GetSupportedLanguages().ToList();
+
+			foreach (var language in languages) {
+				languageCodes.Contains(language.Name).ShouldBeTrue($"Language {language.Name} is not loaded in the LanguageManager");
+			}
+			
+		}
+		
 		void CheckParametersMatch(string languageCode, string translationKey) {
 			var referenceMessage = _languages.GetString(translationKey);
 			var translatedMessage = _languages.GetString(translationKey, new CultureInfo(languageCode));
@@ -132,6 +151,22 @@
 				AddTranslation("en", "NotNullValidator", "foo");
 			}
 		}
+
+		private class TestValidator : PropertyValidator {
+			public TestValidator(IStringSource errorMessageSource) : base(errorMessageSource) {
+			}
+
+			public TestValidator(string errorMessageResourceName, Type errorMessageResourceType) : base(errorMessageResourceName, errorMessageResourceType) {
+			}
+
+			public TestValidator(string errorMessage) : base(errorMessage) {
+			}
+
+			protected override bool IsValid(PropertyValidatorContext context) {
+				return true;
+			}
+		}
+
 
 	}
 }

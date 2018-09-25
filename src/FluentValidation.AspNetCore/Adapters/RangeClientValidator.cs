@@ -45,19 +45,19 @@ namespace FluentValidation.AspNetCore {
 				.AppendPropertyName(Rule.GetDisplayName())
 				.AppendArgument("From", RangeValidator.From)
 				.AppendArgument("To", RangeValidator.To);
-			var messageNeedsSplitting = RangeValidator.ErrorMessageSource.ResourceType == typeof(LanguageManager);
+			var messageNeedsSplitting = RangeValidator.Options.ErrorMessageSource.ResourceType == typeof(LanguageManager);
 
 			string message;
 
 			try {
-				message = RangeValidator.ErrorMessageSource.GetString(null);
+				message = RangeValidator.Options.ErrorMessageSource.GetString(null);
 			}
 			catch (FluentValidationMessageFormatException) {
 				message =ValidatorOptions.LanguageManager.GetStringForValidator<InclusiveBetweenValidator>();
 				messageNeedsSplitting = true;
 			}
 
-			if (messageNeedsSplitting)
+			if (messageNeedsSplitting && message.Contains(".") && message.Contains("{Value}"))
 			{
 				// If we're using the default resources then the mesage for length errors will have two parts, eg:
 				// '{PropertyName}' must be between {From} and {To}. You entered {Value}.

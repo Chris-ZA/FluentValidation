@@ -27,8 +27,8 @@ namespace FluentValidation.Resources {
 			Translate<GreaterThanOrEqualValidator>("Wartość pola '{PropertyName}' musi być równa lub większa niż  '{ComparisonValue}'.");
 			Translate<GreaterThanValidator>("Wartość pola '{PropertyName}' musi być większa niż '{ComparisonValue}'.");
 			Translate<LengthValidator>("Długość pola '{PropertyName}' musi się zawierać pomiędzy {MinLength} i {MaxLength} znaki(ów). Wprowadzono {TotalLength} znaki(ów).");
-			Translate<MinimumLengthValidator>("Długość pola '{PropertyName}' musi się zawierać pomiędzy {MinLength} i 1000 znaki(ów). Wprowadzono {TotalLength} znaki(ów).");
-			Translate<MaximumLengthValidator>("Długość pola '{PropertyName}' musi się zawierać pomiędzy 0 i {MaxLength} znaki(ów). Wprowadzono {TotalLength} znaki(ów).");
+			Translate<MinimumLengthValidator>("Długość pola \"{PropertyName}\" musi być większa lub równa {MinLength} znaki(ów). Wprowadzono {TotalLength} znaki(ów).");
+			Translate<MaximumLengthValidator>("Długość pola \"{PropertyName}\" musi być mniejszy lub równy {MaxLength} znaki(ów). Wprowadzono {TotalLength} znaki(ów).");
 			Translate<LessThanOrEqualValidator>("Wartość pola '{PropertyName}' musi być równa lub mniejsza niż '{ComparisonValue}'.");
 			Translate<LessThanValidator>("Wartość pola '{PropertyName}' musi być mniejsza niż '{ComparisonValue}'.");
 			Translate<NotEmptyValidator>("Pole '{PropertyName}' nie może być puste.");
@@ -43,7 +43,9 @@ namespace FluentValidation.Resources {
 			Translate<ExclusiveBetweenValidator>("'{PropertyName}' musi się zawierać pomiędzy {From} i {To} (wyłącznie). Wprowadzono {Value}.");
 			Translate<CreditCardValidator>("Pole '{PropertyName}' nie zawiera poprawnego numer karty kredytowej.");
 			Translate<ScalePrecisionValidator>("Wartość pola '{PropertyName}' nie może mieć więcej niż {expectedPrecision} cyfr z dopuszczalną dokładnością {expectedScale} cyfr po przecinku. Znaleziono {digits} cyfr i {actualScale} cyfr po przecinku.");
-
+			Translate<EmptyValidator>("\"{PropertyName}\" powinno być puste.");
+			Translate<NullValidator>("\"{PropertyName}\" powinno być puste.");
+			Translate<EnumValidator>("\"{PropertyName}\" ma zakres wartości, który nie obejmuje {PropertyValue}.");
 		}
 	}
 }

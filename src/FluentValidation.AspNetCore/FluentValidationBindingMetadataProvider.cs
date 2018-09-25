@@ -19,28 +19,24 @@
 namespace FluentValidation.AspNetCore {
 	using Microsoft.AspNetCore.Mvc.ModelBinding.Metadata;
 
-	internal class FluentValidationBindingMetadataProvider : IBindingMetadataProvider, IValidationMetadataProvider {
+	internal class FluentValidationBindingMetadataProvider : IBindingMetadataProvider {
 		public const string Prefix = "_FV_REQUIRED|";
 
+		/// <summary>
+		/// If we're validating a non-nullable value type then
+		/// MVC will automatically add a "Required" error message.
+		/// We prefix these messages with a placeholder, so we can identify and remove them 
+		/// during the validation process.
+		/// <see cref="FluentValidationVisitor"/>
+		/// <see cref="MvcValidationHelper.RemoveImplicitRequiredErrors"/>
+		/// <see cref="MvcValidationHelper.ReApplyImplicitRequiredErrorsNotHandledByFV"/>
+		/// </summary>
+		/// <param name="context"></param>
 		public void CreateBindingMetadata(BindingMetadataProviderContext context) {
 			if (context.Key.MetadataKind == ModelMetadataKind.Property) {
 				var original = context.BindingMetadata.ModelBindingMessageProvider.ValueMustNotBeNullAccessor;
-
-				// MS introduced an annoying breaking change in aspnetcore 2.0, instead of using a setter they have an explicit Set method instead ¯\_(ツ)_/¯
-				// The multitargetting for this project means that the net451 and netstandard1.6 versions target aspnetcore 1.1 which uses the setter
-				// The netstandard2.0 version calls the set method.
-
-#if NETSTANDARD1_6 || NET451
-				context.BindingMetadata.ModelBindingMessageProvider.ValueMustNotBeNullAccessor = s => Prefix + original(s);
-#endif
-#if NETSTANDARD2_0
 				context.BindingMetadata.ModelBindingMessageProvider.SetValueMustNotBeNullAccessor(s => Prefix + original(s));
-#endif
-
 			}
-		}
-
-		public void CreateValidationMetadata(ValidationMetadataProviderContext context) {
 		}
 	}
 }
